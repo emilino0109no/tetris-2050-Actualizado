@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tetris 2050</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #ff0000, #00ff00, #0000ff);
+            background-size: 400% 400%;
+            animation: gradientAnimation 15s ease infinite;
+            overflow: hidden;
+            color: #fff;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        @keyframes gradientAnimation {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .game-container {
+            position: relative;
+            border: 2px solid #fff;
+            background-color: rgba(0, 0, 0, 0.8);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+            width: 300px;
+            height: 600px;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background-color: #111;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid #fff;
+            color: #fff;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        button:focus {
+            outline: none;
+        }
+
+        #score {
+            position: absolute;
+            left: 20px;
+            top: 20px;
+            font-size: 24px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .neon {
+            text-shadow: 
+                0 0 5px #fff,
+                0 0 10px #fff,
+                0 0 20px #fff,
+                0 0 40px #ff00ff,
+                0 0 80px #ff00ff,
+                0 0 90px #ff00ff,
+                0 0 100px #ff00ff,
+                0 0 150px #ff00ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="300" height="600"></canvas>
+        <div id="score" class="neon">Score: 0</div>
+    </div>
+    <button id="pauseButton">⏸</button>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const context = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+
+        const ROWS = 20;
+        const COLS = 10;
+        const BLOCK_SIZE = 30;
+
+        canvas.width = COLS * BLOCK_SIZE;
+        canvas.height = ROWS * BLOCK_SIZE;
+
+        const colors = [
+            '#ff6347',
+            '#4682b4',
+            '#ffa500',
+            '#ffd700',
+            '#32cd32',
+            '#9370db',
+            '#00ced1'
+        ];
+
+        const tetrominoes = [
+            { shape: [[1,1], [1,1]], color: colors[0] }, // O
+            { shape: [[0,1,1], [1,1,0]], color: colors[1] }, // Z
+            { shape: [[1,1,0], [0,1,1]], color: colors[2] }, // S
+            { shape: [[1,0,0], [1,1,1]], color: colors[3] }, // J
+            { shape: [[0,0,1], [1,1,1]], color: colors[4] }, // L
+            { shape: [[0,1,0], [1,1,1]], color: colors[5] }, // T
+            { shape: [[1,1,1,1]], color: colors[6] } // I
+        ];
+
+        function drawBlock(x, y, color) {
+            context.fillStyle = color;
+            context.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+
+            context.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            context.lineWidth = 2;
+            context.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+
+            context.shadowBlur = 20;
+            context.shadowColor = color;
+
+            const gradient = context.createRadialGradient(
+                x * BLOCK_SIZE + BLOCK_SIZE / 2, y * BLOCK_SIZE + BLOCK_SIZE / 2,
+                BLOCK_SIZE / 4,
+                x * BLOCK_SIZE + BLOCK_SIZE / 2, y * BLOCK_SIZE + BLOCK_SIZE / 2,
+                BLOCK_SIZE / 2
+            );
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+            gradient.addColorStop(1, color);
+
+            context.fillStyle = gradient;
+            context.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        }
+
+        function drawTetromino(tetromino, offsetX, offsetY) {
+            tetromino.shape.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        drawBlock(x + offsetX, y + offsetY, tetromino.color);
+                    }
+                });
+            });
+        }
+
+        function createMatrix(rows, cols) {
+            const matrix = [];
+            while (rows--) {
+                matrix.push(new Array(cols).fill(0));
+            }
+            return matrix;
+        }
+
+        function rotate(tetromino) {
+            const newTetromino = tetromino.shape[0].map((_, index) =>
+                tetromino.shape.map(row => row[index]).reverse()
+            );
+            return { shape: newTetromino, color: tetromino.color };
+        }
+
+        const matrix = createMatrix(ROWS, COLS);
+        let dropCounter = 0;
+        let dropInterval = 1000;
+        let lastTime = 0;
+        let paused = false;
+        let score = 0;
+
+        function merge(matrix, tetromino, offset) {
+            tetromino.shape.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        matrix[y + offset.y][x + offset.x] = tetromino.color;
+                    }
+                });
+            });
+        }
+
+        function collide(matrix, tetromino, offset) {
+            for (let y = 0; y < tetromino.shape.length; y++) {
+                for (let x = 0; x < tetromino.shape[y].length; x++) {
+                    if (tetromino.shape[y][x] !== 0 &&
+                        (matrix[y + offset.y] && matrix[y + offset.y][x + offset.x]) !== 0) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function drawMatrix(matrix, offsetX, offsetY) {
+            matrix.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        drawBlock(x + offsetX, y + offsetY, value);
+                    }
+                });
+            });
+        }
+
+        function removeFullLines(matrix) {
+            outer: for (let y = matrix.length - 1; y >= 0; y--) {
+                for (let x = 0; x < matrix[y].length; x++) {
+                    if (matrix[y][x] === 0) {
+                        continue outer;
+                    }
+                }
+                const row = matrix.splice(y, 1)[0].fill(0);
+                matrix.unshift(row);
+                score += 10;
+                scoreElement.textContent = `Score: ${score}`;
+            }
+        }
+
+        function createRandomTetromino() {
+            const tetromino = tetrominoes[Math.floor(Math.random() * tetrominoes.length)];
+            return tetromino;
+        }
+
+        let tetromino = createRandomTetromino();
+        let offset = { x: 3, y: 0 };
+
+        function update(time = 0) {
+            if (paused) return;
+
+            const deltaTime = time - lastTime;
+            lastTime = time;
+
+            dropCounter += deltaTime;
+            if (dropCounter > dropInterval) {
+                offset.y++;
+                if (collide(matrix, tetromino, offset)) {
+                    offset.y--;
+                    merge(matrix, tetromino, offset);
+                    removeFullLines(matrix);
+                    tetromino = createRandomTetromino();
+                    offset = { x: 3, y: 0 };
+                }
+                dropCounter = 0;
+            }
+
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            drawMatrix(matrix, 0, 0);
+            drawTetromino(tetromino, offset.x, offset.y);
+
+            requestAnimationFrame(update);
+        }
+
+        document.addEventListener('keydown', event => {
+            if (event.key === 'ArrowLeft') {
+                offset.x--;
+                if (collide(matrix, tetromino, offset)) {
+                    offset.x++;
+                }
+            } else if (event.key === 'ArrowRight') {
+                offset.x++;
+                if (collide(matrix, tetromino, offset)) {
+                    offset.x--;
+                }
+            } else if (event.key === 'ArrowDown') {
+                offset.y++;
+                if (collide(matrix, tetromino, offset)) {
+                    offset.y--;
+                }
+            } else if (event.key === 'q' || event.key === 'Q') {
+                const rotatedTetromino = rotate(tetromino);
+                if (!collide(matrix, rotatedTetromino, offset)) {
+                    tetromino = rotatedTetromino;
+                }
+            }
+        });
+
+        const pauseButton = document.getElementById('pauseButton');
+        pauseButton.addEventListener('click', () => {
+            paused = !paused;
+            pauseButton.textContent = paused ? '▶' : '⏸';
+            if (!paused) {
+                update();
+            }
+        });
+
+        update();
+    </script>
+</body>
+</html>
